@@ -4,6 +4,8 @@ const slugify = require('slugify');
 const { KVStore } = require('google-cloud-kvstore');
 const { Datastore } = require('@google-cloud/datastore');
 const sgMail = require('@sendgrid/mail');
+const winston = require('winston');
+const {LoggingWinston} = require('@google-cloud/logging-winston');
 
 const store = new KVStore(new Datastore({ projectId: 'twsupdates' }));
 
@@ -12,11 +14,26 @@ const URL =
 
 const CASE_OFFERS_RE = /^SC\d/;
 
+const loggingWinston = new LoggingWinston();
+
+const logger = winston.createLogger({
+  level: 'info',
+  transports: [
+    new winston.transports.Console(),
+    loggingWinston,
+  ],
+});
+
 module.exports = async function (req, res) {
-  console.log('IP', req.headers['x-forwarded-for'] || req.socket.remoteAddress);
+  const cron = req.headers['x-appengine-cron'];
+  logger.info(`CRON: ${cron}`);
+  if (!cron) {
+    res.send(404);
+    return;
+  }
 
   const response = await fetch(URL);
-  console.log('got url', URL);
+  logger.info(`got url: ${URL}`);
   const data = (await response.text()).split('\n').slice(1).join('\n');
 //   const data = `Product title,Vintage,Price,Origin,Product code,Drink date,Grape,Type,Alcohol,Style,Closure type,Description
 // Undurraga Cauquenes Estate Maule Viognier Roussanne Marsanne 2022,2022,8.50 / Bottle,,CE12571,2023 - 2026,Viognier/Rousanne/Marsanne,White Wine,0%,2 - Dry,Screwcap,Undurraga Cauquenes Estate Maule Viognier Roussanne Marsanne 2022
@@ -35,7 +52,7 @@ module.exports = async function (req, res) {
 
   const csv = await neatCsv(data);
   const cursor = await store.get('latest');
-  console.log('got cursor', cursor);
+  logger.info(`got cursor: ${cursor}`);
 
   let latest;
   let out = [];
@@ -55,7 +72,7 @@ module.exports = async function (req, res) {
       break;
     }
 
-    console.log('process', id);
+    logger.info(`process ${id}`);
 
     out.push({
       url: `https://www.thewinesociety.com/product/${encodeURIComponent(
@@ -70,13 +87,13 @@ module.exports = async function (req, res) {
   }
 
   if (!out.length) {
-    console.log('no updates');
+    logger.info('no updates');
     res.send('empty');
     return;
   }
 
   await store.set('latest', latest || cursor);
-  console.log('Saved cursor', latest || cursor);
+  logger.info(`Saved cursor ${latest || cursor}`);
   let type;
 
   const html = out.sort((a, b) => a.type > b.type ? 1 : -1).reduce((str, row) => {
@@ -91,13 +108,16 @@ ${row.desc}<br>
 
   const date = new Date();
 
+  const to = 'adamjmcgrath@gmail.com';
+  logger.info(`Sending mail to: ${'adamjmcgrath@gmail.com'}`);
   sgMail.setApiKey(await store.get('SENDGRID_API_KEY'));
   await sgMail.send({
-    to: 'adamjmcgrath@gmail.com',
+    to,
     from: 'adamjmcgrath@gmail.com',
     subject: 'TWS Update: ' + `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`,
     html,
   });
+  logger.info(`Sent mail`);
 
   res.send(html);
 };

@@ -1,0 +1,4 @@
+cron:
+  - description: "update"
+    url: /updates
+    schedule: every 12 hours
