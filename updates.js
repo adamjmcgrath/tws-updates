@@ -13,6 +13,7 @@ const URL =
   'https://www.thewinesociety.com/CustomFileDownload/DownloadCsv?contentId=1073743634&parameters=%7B%22Body%22%3A%22%22%2C%22Closure%22%3A%22%22%2C%22Country%22%3A%22%22%2C%22DrinkEndFrom%22%3A%22%22%2C%22DrinkEndTo%22%3A%22%22%2C%22DrinkStartFrom%22%3A%22%22%2C%22DrinkStartTo%22%3A%22%22%2C%22Food%22%3A%22%22%2C%22Grape%22%3A%22%22%2C%22HideCountry%22%3Afalse%2C%22HideRegion%22%3Afalse%2C%22HideSubRegion%22%3Afalse%2C%22LevelMaximum%22%3Anull%2C%22LevelMinimum%22%3Anull%2C%22Oak%22%3A%22%22%2C%22Organic%22%3A%22%22%2C%22Producer%22%3A%22%22%2C%22ProductType%22%3A%22%22%2C%22Region%22%3A%22%22%2C%22Style%22%3A%22%22%2C%22SubRegion%22%3A%22%22%2C%22Unit%22%3A%22%22%2C%22VintageFrom%22%3A%22%22%2C%22VintageTo%22%3A%22%22%2C%22ReserveAction%22%3A1%2C%22DrinkStatus%22%3Anull%2C%22OnOfferStatus%22%3Anull%2C%22PartsListQuantity%22%3Anull%2C%22PriceMaximum%22%3Anull%2C%22PriceMinimum%22%3Anull%2C%22PriceRange%22%3A%22%22%2C%22Rating%22%3A%22%22%2C%22Saving%22%3A%22%22%2C%22Sort%22%3A7%2C%22StarRatingFrom%22%3Anull%2C%22StarRatingTo%22%3Anull%2C%22Status%22%3A%22%22%2C%22Type%22%3A1%2C%22View%22%3A1%2C%22TempCategoryContent%22%3A%221073742303__CatalogContent%22%2C%22Page%22%3A1%2C%22PageSize%22%3A90%2C%22q%22%3A%22%22%2C%22SearchTerm%22%3A%22%22%7D&rel=nofollow';
 
 const CASE_OFFERS_RE = /^SC\d/;
+const MX_RE = /^MX\d/;
 
 const loggingWinston = new LoggingWinston();
 
@@ -24,10 +25,12 @@ const logger = winston.createLogger({
   ],
 });
 
+const isLocal = process.env.LOCAL_DEV;
+
 module.exports = async function (req, res) {
   const cron = req.headers['x-appengine-cron'];
   logger.info(`CRON: ${cron}`);
-  if (!cron) {
+  if (!cron && !isLocal) {
     res.send(404);
     return;
   }
@@ -51,7 +54,7 @@ module.exports = async function (req, res) {
 // Big Reds Case,0,52.00 / Case of 6,,SC23208A,N/A,,,0%,,,Big Reds Case`;
 
   const csv = await neatCsv(data);
-  const cursor = await store.get('latest');
+  const cursor = process.env.TWS_CURSOR || await store.get('latest');
   logger.info(`got cursor: ${cursor}`);
 
   let latest;
@@ -59,12 +62,12 @@ module.exports = async function (req, res) {
 
   // Product title	Vintage	Price	Origin	Product code	Drink date	Grape	Type	Alcohol	Style	Closure type	Description
   for (const row of csv) {
-    const { 'Product code': id, 'Product title': title, Price: price, Description: desc, Type: type } = row;
+    const { 'Product code': id, 'Product title': title, Price: price, Description: desc, Type: type, Vintage: year } = row;
 
     latest = latest || id;
 
     // Ignore wine case offers.
-    if (CASE_OFFERS_RE.test(id)) {
+    if (CASE_OFFERS_RE.test(id) || MX_RE.test(id) || year === '0') {
       continue;
     }
 
@@ -92,7 +95,9 @@ module.exports = async function (req, res) {
     return;
   }
 
-  await store.set('latest', latest || cursor);
+  if (!isLocal) {
+    await store.set('latest', latest || cursor);
+  }
   logger.info(`Saved cursor ${latest || cursor}`);
   let type;
 
@@ -106,18 +111,19 @@ ${row.desc}<br>
 <a href="${row.url}">${row.url}</a><br>
 £${row.price}<br><br>`;}, '')
 
-  const date = new Date();
-
-  const to = 'adamjmcgrath@gmail.com';
-  logger.info(`Sending mail to: ${'adamjmcgrath@gmail.com'}`);
-  sgMail.setApiKey(await store.get('SENDGRID_API_KEY'));
-  await sgMail.send({
-    to,
-    from: 'adamjmcgrath@gmail.com',
-    subject: 'TWS Update: ' + `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`,
-    html,
-  });
-  logger.info(`Sent mail`);
+  if (!isLocal) {
+    const date = new Date();
+    const to = 'adamjmcgrath@gmail.com';
+    logger.info(`Sending mail to: ${'adamjmcgrath@gmail.com'}`);
+    sgMail.setApiKey(await store.get('SENDGRID_API_KEY'));
+    await sgMail.send({
+      to,
+      from: 'adamjmcgrath@gmail.com',
+      subject: 'TWS Update: ' + `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`,
+      html,
+    });
+    logger.info(`Sent mail`);
+  }
 
   res.send(html);
 };
