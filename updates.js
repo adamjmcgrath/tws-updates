@@ -66,13 +66,13 @@ module.exports = async function (req, res) {
 
     latest = latest || id;
 
+    if (id == cursor) {
+      break;
+    }
+
     // Ignore wine case offers.
     if (CASE_OFFERS_RE.test(id) || MX_RE.test(id) || year === '0') {
       continue;
-    }
-
-    if (id == cursor) {
-      break;
     }
 
     logger.info(`process ${id}`);
@@ -113,7 +113,7 @@ ${row.desc}<br>
 
   if (!isLocal) {
     const date = new Date();
-    const to = 'adamjmcgrath@gmail.com';
+    const to = ['adamjmcgrath@gmail.com', 'thomas.holmes@miller-insurance.com', 'sthholmes@gmail.com'];
     logger.info(`Sending mail to: ${'adamjmcgrath@gmail.com'}`);
     sgMail.setApiKey(await store.get('SENDGRID_API_KEY'));
     await sgMail.send({

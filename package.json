@@ -6,6 +6,7 @@
   "scripts": {
     "prettier": "npx prettier *.js -w",
     "start": "node server.js",
+    "start:local": "LOCAL_DEV=1 node server.js",
     "deploy": "gcloud app deploy && gcloud app deploy cron.yaml"
   },
   "keywords": [],
